@@ -159,14 +159,36 @@ void handleCommand(char* payload) {
   }
 
   else if (strcmp(command, "get") == 0 && pin >= 0) {
-    int pin_id = atoi(number);
-    int zone_num = zoneExists(pin_id);
     if (getPinIndex(pin) < 0 || !zoneActive[getPinIndex(pin)])
       Serial.printf("%d.zone does not exists.\n", zone_num)
     else {
-      sprintf(msg_buf, "%d", zones[pin_id].isOn); //TODO szerekeszt +isRunning (mindenkiét)
-      Serial.printf("Sending to [%u]: %s\n", client_num, msg_buf);
-      webSocket.sendTXT(client_num, msg_buf);
+      //sprintf(msg_buf, "%d", zoneActive[getPinIndex(pin)]); //zones[pin_id].isOn TODO szerekeszt +isRunning (mindenkiét)
+      // Build JSON response
+      String response = "{"; //TODO String or char*
+      response += "\"pin\":" + String(pin) + ",";
+      response += "\"status\":" + String(digitalRead(pin)) + ",";
+
+      // Is there a schedule currently running?
+      bool isRunning = (pinTimers[getPinIndex(pin)] > 0);
+      response += "\"schedule_running\":" + String(isRunning ? "true" : "false") + ",";
+
+      response += "\"schedules\":[";
+      bool first = true;
+      for (int i = 0; i < MAX_SCHEDULES; i++) {
+        if (schedules[i].active && schedules[i].pin == pin) {
+          if (!first) response += ",";
+          response += "{";
+          response += "\"hour\":" + String(schedules[i].hour) + ",";
+          response += "\"minute\":" + String(schedules[i].minute) + ",";
+          response += "\"duration\":" + String(schedules[i].duration);
+          response += "}";
+          first = false;
+        }
+      }
+      response += "]}";
+
+      Serial.printf("Sending to [%u]: %s\n", client_num, response.c_str());
+      webSocket.sendTXT(client_num, response);
     }
   }
 
