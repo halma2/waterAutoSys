@@ -3,36 +3,180 @@
 #include <WebSocketsServer.h>
 #include <ESPmDNS.h>
 #include <SPIFFS.h>
+#include <EEPROM.h>
+#include <time.h>
+#include <RTClib.h>
 
 const char* ssid = "";
 const char* password = "";
 const int pins[] = {0, 2, 3, 4, 5}; //Amilyen sorrendben vannak bekotve, NEM dinamikus lesz, aé 16-os--------------------------------------------------------------------------
+#define NUM_PINS 5
+#define EEPROM_SIZE 1024
+#define MAX_SCHEDULES 20
 
-struct zone {
-  int id;
-  bool isOn = false;
-  bool isRuning = false;
-  bool isActivated = false;
-  //period* periods = {};
-  zone() : id(0), isOn(false), isRuning(false), isActivated(false) {}
+RTC_DS3231 rtc;
+
+struct ScheduleEntry {
+  int pin;
+  int hour;
+  int minute;
+  int duration; // in minutes
+  bool active; //isOn vs. isRunning vs. isActivated TODDDOOOOOOOOOOOOOOOOOOO: isOn zonActive olvas
 };
-zone zones[sizeof(pins)];
-/*struct period {
-  int st_h;
-  int st_min;
-  int per_min;
-}*/
+
+ScheduleEntry schedules[MAX_SCHEDULES];
+unsigned long pinTimers[NUM_PINS] = {0};
+bool zoneActive[] = {0, 0, 0, 0, 0}; // not dynamio
+
+
 AsyncWebServer server(80);
 WebSocketsServer webSocket = WebSocketsServer(1337);
 char msg_buf[10];
 
 
-int zoneExists(int id) {
-  for (int i= 0; i < sizeof(zones); i++) {
-    if (zones[i].id == id)
-      return i;
+
+// === Schedule Logic ===
+void checkScheduledTasks() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    DateTime now = rtc.now();
+    timeinfo.tm_hour = now.hour();
+    timeinfo.tm_min = now.minute();
+  }
+
+  for (int i = 0; i < MAX_SCHEDULES; i++) {
+    if (schedules[i].active &&
+        schedules[i].hour == timeinfo.tm_hour &&
+        schedules[i].minute == timeinfo.tm_min) {
+      int idx = getPinIndex(schedules[i].pin);
+      digitalWrite(schedules[i].pin, HIGH);
+      pinTimers[idx] = millis() + schedules[i].duration * 60000UL;
+    }
+  }
+}
+
+void handleTimers() {
+  unsigned long now = millis();
+  for (int i = 0; i < NUM_PINS; i++) {
+    if (pinTimers[i] > 0 && now > pinTimers[i]) {
+      digitalWrite(pins[i], LOW);
+      pinTimers[i] = 0;
+    }
+  }
+}
+
+void loadSchedulesFromEEPROM() {
+  for (int i = 0; i < MAX_SCHEDULES; i++) {
+    EEPROM.get(i * sizeof(ScheduleEntry), schedules[i]);
+  }
+}
+
+void saveSchedulesToEEPROM() {
+  for (int i = 0; i < MAX_SCHEDULES; i++) {
+    EEPROM.put(i * sizeof(ScheduleEntry), schedules[i]);
+  }
+  EEPROM.commit();
+}
+
+void addSchedule(int pin, int hour, int minute, int duration) {
+  for (int i = 0; i < MAX_SCHEDULES; i++) {
+    if (!schedules[i].active) {
+      schedules[i] = {pin, hour, minute, duration, true};
+      saveSchedulesToEEPROM();
+      break;
+    }
+  }
+}
+
+
+int getPinIndex(int pin) { //if not exists, returns -1
+  for (int i = 0; i < NUM_PINS; i++) {
+    if (pins[i] == pin) return i;
   }
   return -1;
+}
+
+void handleCommand(char* payload) {
+  Serial.printf("[%u] Received text: %s\n", client_num, payload);
+  char* cmd = strtok(payload, ".");
+  char* pinStr = strtok(NULL, ".");// Get the part after the dot
+  int pin = pinStr ? atoi(pinStr) : -1;
+  char* timeStr = strtok(NULL, ".");
+  int time = timeStr ? atoi(timeStr) : 0;
+
+  if (strcmp(cmd, "t_on") == 0 && pin >= 0) {
+    if (getPinIndex(pin) < 0 || !zoneActive[getPinIndex(pin)])
+      Serial.printf("%d.zone does not exists.\n", zone_num)
+    else {
+      digitalWrite(pin, HIGH);
+      pinTimers[getPinIndex(pin)] = millis() + time * 60000UL;
+    }
+  }
+  
+  else if (strcmp(cmd, "t_off") == 0 && pin >= 0) {
+    if (getPinIndex(pin) < 0 || !zoneActive[getPinIndex(pin)])
+      Serial.printf("%d.zone does not exists.\n", zone_num)
+    else {
+      digitalWrite(pin, LOW);
+      pinTimers[getPinIndex(pin)] = 0;
+    }
+  }
+
+  else if (strcmp(cmd, "s_on") == 0 && pin >= 0 && timeStr) {
+    if (getPinIndex(pin) < 0 || !zoneActive[getPinIndex(pin)])
+      Serial.printf("%d.zone does not exists.\n", zone_num)
+    else {
+      // format: s_on.5.08:30.20
+      char* hm = timeStr;
+      char* durationStr = strtok(NULL, ".");
+      if (!durationStr) return;
+
+      int hour = atoi(strtok(hm, ":"));
+      int minute = atoi(strtok(NULL, ":"));
+      int duration = atoi(durationStr);
+      addSchedule(pin, hour, minute, duration);
+    }
+  }
+
+  else if (strcmp(cmd, "new") == 0 && pin >= 0) {
+    if (getPinIndex(pin) < 0)
+      Serial.printf("%d.zone does not exists.\n", zone_num)
+    else if (zoneActive[getPinIndex(pin)])
+      Serial.printf("%d.zone is already activated\n", zone_num);
+    else {
+      zoneActive[getPinIndex(pin)] = true;
+      Serial.printf("%d.zone is deactivated\n", zone_num);
+    }
+  }
+
+  else if (strcmp(cmd, "del") == 0 && pin >= 0) {
+    if (getPinIndex(pin) < 0 || !zoneActive[getPinIndex(pin)])
+      Serial.printf("%d.zone does not exists.\n", zone_num)
+    else {
+      zoneActive[getPinIndex(pin)] = false;
+      Serial.printf("%d.zone is deactivated\n", zone_num);
+    }
+  }
+
+  else if (strcmp(command, "get") == 0 && pin >= 0) {
+    int pin_id = atoi(number);
+    int zone_num = zoneExists(pin_id);
+    if (getPinIndex(pin) < 0 || !zoneActive[getPinIndex(pin)])
+      Serial.printf("%d.zone does not exists.\n", zone_num)
+    else {
+      sprintf(msg_buf, "%d", zones[pin_id].isOn); //TODO szerekeszt +isRunning (mindenkiét)
+      Serial.printf("Sending to [%u]: %s\n", client_num, msg_buf);
+      webSocket.sendTXT(client_num, msg_buf);
+    }
+  }
+
+  else
+    Serial.printf("[%u] Command not recognized\n", client_num);
+}
+
+
+void syncTime() {
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 }
 
 void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t* payload, size_t length){
@@ -47,105 +191,8 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t* payload, size_
         Serial.println(ip.toString());
       break;
     }
-    case WStype_TEXT: { //Format: "cmd.id_num"
-      Serial.printf("[%u] Received text: %s\n", client_num, payload);
-      char* command = strtok((char *)payload, ".");
-      char* number = strtok(NULL, "."); // Get the part after the dot
-      if (command != NULL && number != NULL) {
-        if (strcmp(command, "new") == 0) {
-          int pin_id = atoi(number);
-          int zone_num = zoneExists(pin_id);
-          if (zone_num == -1)
-            Serial.printf("%d.zone does not exists.\n", zone_num);
-          else if (zones[zone_num].isActivated)
-            Serial.printf("%d.zone is already activated\n", zone_num);
-          else {
-            zones[zone_num].isActivated = true;
-            zones[zone_num].isOn = true;
-            Serial.printf("%d.zone is activated\n", zone_num);
-          }
-         }
-
-        if (strcmp(command, "t_on") == 0) {
-          int pin_id = atoi(number);
-          int zone_num = zoneExists(pin_id);
-          if (zone_num == -1)
-            Serial.printf("%d.zone is already activated or not exists.\n", zone_num);
-          else if (!zones[zone_num].isActivated)
-            Serial.printf("%d.zone is not activated\n", zone_num);
-          else if (zones[zone_num].isOn)
-            Serial.printf("%d.zone is already on\n", zone_num);
-          else {
-            zones[zone_num].isOn = true;
-            Serial.printf("%d.zone is on\n", zone_num);
-            digitalWrite(pin_id, HIGH); //TODO kiszed
-          }
-         }
-
-        /*else if (strcmp(command, "set") == 0) { //TODO átalakt-> időpont
-        int pin_id = atoi(number);
-        int zone_num = activateZone(pin_id)
-        if (zone_num == -1)
-          Serial.printf("%d.zone is already activated or not exists.\n", zone_num);
-        else if (!zones[zone_num].isActivated)
-          Serial.printf("%d.zone is not activated\n", zone_num);
-        else if (!zones[zone_num].isOn) //TODO kiszed
-          Serial.printf("%d.zone is not on\n", zone_num);
-        else {
-          zones[zone_num],isOn = true;
-          Serial.printf("%d.zone is activated\n", zone_num);
-          digitalWrite(pin_id, HIGH); //TODO kiszed
-        }
-        }*/
-
-        else if (strcmp(command, "t_off") == 0) {
-          int pin_id = atoi(number);
-          int zone_num = zoneExists(pin_id);
-          if (zone_num == -1)
-            Serial.printf("%d.zone is already activated or not exists.\n", zone_num);
-          else if (!zones[zone_num].isActivated)
-            Serial.printf("%d.zone is not activated\n", zone_num);
-          else if (!zones[zone_num].isOn)
-            Serial.printf("%d.zone is already off\n", zone_num);
-          else {
-            zones[zone_num].isOn = false;
-            Serial.printf("%d.zone is off\n", zone_num);
-            digitalWrite(pin_id, LOW); //TODO kiszed
-          }
-        }
-
-        else if (strcmp(command, "del") == 0) {
-          int pin_id = atoi(number);
-          int zone_num = zoneExists(pin_id);
-          if (zone_num == -1)
-            Serial.printf("%d.zone does not exists.\n", zone_num);
-          else if (!zones[zone_num].isActivated)
-            Serial.printf("%d.zone is already deactivated\n", zone_num);
-          else {
-            zones[zone_num].isActivated = false;
-            zones[zone_num].isOn = false;
-            Serial.printf("%d.zone is deactivated\n", zone_num);
-          }
-         }
-        
-        else if (strcmp(command, "get") == 0) {
-          int pin_id = atoi(number);
-          int zone_num = zoneExists(pin_id);
-          if (zone_num == -1)
-             Serial.printf("%d.zone does not exists.\n", zone_num);
-          else {
-            sprintf(msg_buf, "%d", zones[pin_id].isOn); //TODO szerekeszt +isRunning
-            Serial.printf("Sending to [%u]: %s\n", client_num, msg_buf);
-            webSocket.sendTXT(client_num, msg_buf);
-          }
-        } 
-        else {
-          Serial.printf("[%u] Command not recognized\n", client_num);
-        }
-      } 
-      else {
-        Serial.printf("[%u] Invalid message format\n", client_num);
-      }
+    case WStype_TEXT: {
+      handleCommand((char*)payload);
       break;
     }
   }
@@ -183,7 +230,9 @@ void setup() {
   if(!SPIFFS.begin(true)){
     Serial.println("An Error has occurred while mounting SPIFFS");
     return;
-  }  
+  }
+  EEPROM.begin(EEPROM_SIZE);
+  
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
@@ -197,6 +246,12 @@ void setup() {
   Serial.println(WiFi.localIP());
   if (MDNS.begin("locsolás"))
     Serial.println("MDNS responder started");
+
+  syncTime();//before that: connectWiFi();
+  if (!rtc.begin()) Serial.println("RTC not found!");
+
+  loadSchedulesFromEEPROM();
+
   server.on("/", handleRoot);
   server.on("/mystyle.css", HTTP_GET, handleCss);
   server.on("/favicon.ico", HTTP_GET, handleIco);
@@ -212,5 +267,7 @@ void setup() {
 }
 void loop() {
   webSocket.loop();
+  checkScheduledTasks();
+  handleTimers();
   //delay(2);//allow the cpu to switch to other tasks
 }
