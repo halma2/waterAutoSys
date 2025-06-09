@@ -12,23 +12,24 @@ const char* password = "";
 const int pins[] = {0, 2, 3, 4, 5}; //Amilyen sorrendben vannak bekotve, NEM dinamikus lesz, aé 16-os--------------------------------------------------------------------------
 #define NUM_PINS 5
 #define EEPROM_SIZE 1024
-#define MAX_SCHEDULES 20
+#define MAX_SCHEDULES 50
+#define NAME_SIZE 32 //TODO err
+#define NAME_START_ADDR 4000  // avoid overlap with schedules
 
-RTC_DS3231 rtc;
 
 struct ScheduleEntry {
   int pin;
   int hour;
   int minute;
   int duration; // in minutes
-  bool active; //isOn vs. isRunning vs. isActivated TODDDOOOOOOOOOOOOOOOOOOO: isOn zonActive olvas
+  bool active; //todo isOn vs. isRunning vs. isActivated TODO OOOOOOOOOOOOOOOOOO: isOn zonActive olvas
 };
 
 ScheduleEntry schedules[MAX_SCHEDULES];
 unsigned long pinTimers[NUM_PINS] = {0};
 bool zoneActive[] = {0, 0, 0, 0, 0}; // not dynamio
-
-
+String zoneNames[NUM_PINS]; // Indexed by pins[i]
+RTC_DS3231 rtc;
 AsyncWebServer server(80);
 WebSocketsServer webSocket = WebSocketsServer(1337);
 char msg_buf[10];
@@ -80,13 +81,43 @@ void saveSchedulesToEEPROM() {
 
 void addSchedule(int pin, int hour, int minute, int duration) {
   for (int i = 0; i < MAX_SCHEDULES; i++) {
-    if (!schedules[i].active) {
+    if (!schedules[i].active) {///----------------------------------del-> mindden sh-ját töröljön------------------------------------------------------
       schedules[i] = {pin, hour, minute, duration, true};
       saveSchedulesToEEPROM();
       break;
     }
   }
 }
+
+void saveZoneNamesToEEPROM() {
+  for (int i = 0; i < NUM_PINS; i++) {
+    saveZoneNameToEEPROM(i);
+  }
+  //EEPROM.commit();
+}
+
+void saveZoneNameToEEPROM(int zoneIndex) { //todo lancolt listaban a ramban-> elég 1et törölni
+  int base = NAME_START_ADDR + zoneIndex * NAME_SIZE;
+  const char* name = zoneNames[pinNum].c_str();
+  for (int j = 0; j < NAME_SIZE; j++) {
+    EEPROM.write(base + j, name[j]);  // writes 0 if past length
+  }
+  EEPROM.commit();
+}
+
+void loadZoneNamesFromEEPROM() {
+  for (int i = 0; i < NUM_PINS; i++) {
+    int base = NAME_START_ADDR + i * NAME_SIZE;
+    char buf[NAME_SIZE + 1];
+    for (int j = 0; j < NAME_SIZE; j++) {
+      buf[j] = EEPROM.read(base + j);
+    }
+    buf[NAME_SIZE] = '\0';  // always null-terminate
+    zoneNames[i] = String(buf);
+  }
+}
+
+
 
 
 int getPinIndex(int pin) { //if not exists, returns -1
@@ -144,8 +175,10 @@ void handleCommand(char* payload) {
     else if (zoneActive[getPinIndex(pin)])
       Serial.printf("%d.zone is already activated\n", zone_num);
     else {
-      zoneActive[getPinIndex(pin)] = true;
-      Serial.printf("%d.zone is deactivated\n", zone_num);
+      if (timeStr != NULL){
+        zoneActive[getPinIndex(pin)] = true;
+        Serial.printf("%d.zone is deactivated\n", zone_num);
+      }
     }
   }
 
@@ -158,6 +191,31 @@ void handleCommand(char* payload) {
     }
   }
 
+  else if (strcmp(command, "name") == 0 && pin >= 0) {
+    char* namePart = timeStr;
+    if (!namePart) return;
+
+    String nameStr = namePart;
+
+    // Reconstruct full name if it includes dots (e.g. "Back.Lawn")
+    char* nextPart;
+    while ((nextPart = strtok(NULL, ".")) != NULL) {
+      nameStr += "." + String(nextPart);
+    }
+    zoneNames[getPinIndex(pin)] = nameStr;
+    saveZoneNameToEEPROM(getPinIndex(i));
+
+    // Format JSON message to server
+    String msg = "{";
+    msg += "\"pin\":" + String(pin) + ",";
+    msg += "\"name\":\"" + nameStr + "\"";
+    msg += "}";
+
+    Serial.printf("Sending zone name update to server: %s\n", msg.c_str());
+    webSocket.sendTXT(msg);  // server handles name saving
+  }
+
+
   else if (strcmp(command, "get") == 0 && pin >= 0) {
     if (getPinIndex(pin) < 0 || !zoneActive[getPinIndex(pin)])
       Serial.printf("%d.zone does not exists.\n", zone_num)
@@ -166,9 +224,10 @@ void handleCommand(char* payload) {
       // Build JSON response
       String response = "{"; //TODO String or char*
       response += "\"pin\":" + String(pin) + ",";
+      response += "\"name\":\"" + zoneNames[i] + "\",";
       response += "\"status\":" + String(digitalRead(pin)) + ",";
 
-      // Is there a schedule currently running?
+      // Is there a schedule currently running? TODO on client side------------------------
       bool isRunning = (pinTimers[getPinIndex(pin)] > 0);
       response += "\"schedule_running\":" + String(isRunning ? "true" : "false") + ",";
 
@@ -188,6 +247,25 @@ void handleCommand(char* payload) {
       response += "]}";
 
       Serial.printf("Sending to [%u]: %s\n", client_num, response.c_str());
+      webSocket.sendTXT(client_num, response);
+    }
+  }
+
+  else if (strcmp(command, "zones") == 0) {
+    if (pin != -1)
+      Serial.printf("Invalid command.\n")
+    else {
+      // Build JSON response
+      String response = "{"; //TODO String or char*
+      for (int i = 0; i < NUM_PINS; i++) {
+          int pin = pins[i];
+          if (zoneActive[i]) {
+            if (!first) response += ",";
+            response += "\"" + i + "\":" + String(pin);
+          }
+        }
+      response += "]}";
+      Serial.printf("Sending active zones: %s\n", response.c_str());
       webSocket.sendTXT(client_num, response);
     }
   }
@@ -235,6 +313,11 @@ void handleIco(AsyncWebServerRequest *request) {
   Serial.println("[" + remote_ip.toString() + "] HTTP GET request of " + request->url());
   request->send(SPIFFS, "/favicon.ico", "image/x-icon");
 }
+void handleManifest(AsyncWebServerRequest *request) {
+  IPAddress remote_ip = request->client()->remoteIP();
+  Serial.println("[" + remote_ip.toString() + "] HTTP GET request of " + request->url());
+  request->send(SPIFFS, "/manifest.json", "text/json"); //todo ell--------------------------
+}
 void handleNotFound(AsyncWebServerRequest *request) {
   IPAddress remote_ip = request->client()->remoteIP();
   Serial.println("[" + remote_ip.toString() + "] HTTP GET request of " + request->url());
@@ -273,10 +356,12 @@ void setup() {
   if (!rtc.begin()) Serial.println("RTC not found!");
 
   loadSchedulesFromEEPROM();
+  loadZoneNamesFromEEPROM();
 
   server.on("/", handleRoot);
   server.on("/mystyle.css", HTTP_GET, handleCss);
   server.on("/favicon.ico", HTTP_GET, handleIco);
+  server.on("/manifest.json", HTTP_GET, handleManifest);
   /*server.on("/inline", []() {
     server.send(200, "text/plain", "this works as well");
   });*/
