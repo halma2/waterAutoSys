@@ -5,259 +5,103 @@
     <title>Öntöző rendszer</title>
     <link href="mystyle.css" type="text/css" rel="stylesheet">
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0d6efd" />
+    <link rel="apple-touch-icon" href="/favicon.ico" />
 </head>
 <body>
-
+<script src="site.js"></script>
 <header>
     <p id="offline">OFFLINE</p>
-    <p><a href="#">OPT</a><a href="#">(?)</a></p>
     <nav>
         <ul>
-            <li><button class="active" onclick="changeZone(16)">16</button></li> <!--TODO 2.0 manuálisan class name +#-t  kiszedni, ÉS CSAK LIIMITÁLTAN-->
+            <!--li><button class="active" onclick="changeZone(16)">16</button></li> <!ú--TODO 2.0 manuálisan class name +#-t  kiszedni, ÉS CSAK LIIMITÁLTAN-->
             <!--li><a href="#" onclick="changeZone(1)">2</a></li>
             <li><a href="#" class="zone-ison" onclick="changeZone(2)">3</a></li>
             <li><a href="#" class="zone-running" onclick="changeZone(3)">4</a></li-->
-
-
-
-            <li class="dropdown">
-                <button class="dropbtn" onmousedown="createZone()">+</button>
-                <div id="new-zone-cont" class="dropdown-content"></div>
-            </li>
-            <li><button id="edit-zone" onclick="editZones()">Szerk</button></li> <!--TODO zonaid===pinszám (új elem: mini droplistből) -> dinamic tömb a c++ban-->
-
+            <div class="fix-menu">
+                <li class="dropdown">
+                    <button class="dropbtn" onmousedown="selectNewZones()">+</button>
+                    <div id="new-zone-cont" class="dropdown-content"></div>
+                </li>
+                <li><button id="edit-zone" onclick="editZones()">Töröl</button></li>
+            </div>
         </ul>
+        <button onclick="{document.getElementById('info-overlay').style.display ='flex';}">Info</button>
     </nav>
 </header>
-
-<p><h2>Zóna: <span id="act-zone-name">1: parikhoz hátulra</span></h2> <!-- TODO 2.0 kiszed-->
-
-<div id="manual-block" style="text-align: center">
-    <p>A következő esemény:<br><!--TODO 2.0 a hét napja: Kedd-->
-        <span id="nxt-d">Kedd</span>,<span id="nxt-h-m">13:30</span></p><!--TODO frissit-->
-    <h2>Állapot</h2>
-    <p>
-        <button id="run-btn">RUN</button>
-        <span id="d-counter-min">60</span> min <!--TODO ha nem fut, akkor a kövi esemény kezdő számmlálója-->
-    </p>
-    <p>Kézi vezérlés<br>be/ki</p>
+<div id="zone-content" style="display: none;">
     <div class="row">
-        <div class="col3" style="text-align: left">
-            <label for="min_slide">1</label>
-        </div>
-        <div class="col3" style="text-align: center">
-            <label for="min_slide"><output id="slider_val_char">30</output></label>
-        </div>
-        <div class="col3" style="text-align: right">
-            <label for="min_slide">60</label>
-        </div>
+        <h2 class="col">
+            Zóna: <span class="name-edit-show" id="act-zone-name">1: parikhoz hátulra</span>
+            <input class="name-edit-hid" type="text" id="name-input" style="display: none;"/>
+            <button class="name-edit-show" onclick="editZoneName()">szerk</button>
+            <button class="name-edit-hid" style="display: none;" onclick="sendEditZoneName()">OK</button>
+        </h2>
+        <div class="col" style="text-align: right;"><button id="turrn-off-btn" onclick="zoneOff()">ON</button></div>
     </div>
-    <input id="min_slide" type="range" min="1" max="60" step="1" value=1 size="100%"
-           oninput="document.getElementById('slider_val_char').value=this.value"/>
-    <div class="row">
-        <div class="col" style="text-align: left">
-            <label for="min_slide">Időtartam</label>
+    <div id="manual-block" style="text-align: center">
+        <p>A következő esemény:<br><!--TODO 2.0 a hét napja: Kedd-->
+            <!--span id="nxt-d">Kedd</span>,--><span id="nxt-h-m"></span></p>
+        <h2>Állapot</h2>
+        <p>
+            <button id="run-btn" onclick="runTimer()">RUN</button>
+            <span id="d-counter-min">60</span> min <!--TODO ha nem fut, akkor a kövi esemény kezdő számmlálója-->
+        </p>
+        <p>Kézi vezérlés<br>be/ki</p>
+        <div class="row">
+            <div class="col3" style="text-align: left">
+                <label for="min_slide">1</label>
+            </div>
+            <div class="col3" style="text-align: center">
+                <label for="min_slide"><output id="slider_val_char">30</output></label>
+            </div>
+            <div class="col3" style="text-align: right">
+                <label for="min_slide">60</label>
+            </div>
         </div>
-        <div class="col" style="text-align: right">
-            <label for="min_slide">perc</label>
+        <input id="min_slide" type="range" min="1" max="60" step="1" value=30 size="100%"
+            oninput="document.getElementById('slider_val_char').value=this.value"/>
+        <div class="row">
+            <div class="col" style="text-align: left">
+                <label for="min_slide">Időtartam</label>
+            </div>
+            <div class="col" style="text-align: right">
+                <label for="min_slide">perc</label>
+            </div>
         </div>
+
     </div>
 
+    <hr>
+    <div id="new-act"><h3><a href="#bottom"><button id="new-act-btn" onclick="createSchedule()">+</button></a> Új esemény beszúrása</h3></div>
+
+    <div id="event-blocks"></div>
 </div>
 
-<hr>
-<div id="new-act"><h3><a href="#bottom"><button id="new-act-btn">+</button></a> Új esemény beszúrása</h3></div>
-
-<div id="event-blocks"></div>
-
 <footer id="bottom">
-    <noscript>FIGYELEM!!! a JS-script futtatás nincs engedélyeze!</noscript>
-    <p>IP cím: <span id="ip-adr">0</span></p><!--todo ip-t betöltéskor-->
+    <noscript>FIGYELEM!!! a JS-script futtatás nincs engedélyezve!</noscript>
+    <p>IP cím: <span id="ip-adr">0</span></p>
 </footer>
 
-
-<script>
-    var url = "ws://locsolás:1337/"
-    var isConnected = false;
-    window.addEventListener("load", wsConnect, false)
-    function wsConnect() {
-        websocket = new WebSocket(url)
-        websocket.onopen = function() { onOpen() }
-        websocket.onclose = function() { onClose() }
-        websocket.onmessage = function(evt) { onMessage(evt) }
-        websocket.onerror = function(evt) { console.log("SOCKET_ERROR: " + evt.data); }
-    }
-    function onOpen() {
-        console.log("Connected")
-        document.getElementById('offline').hidden = true
-        isConnected = true;
-        //TODO lekérdezések, F5
-    }
-    function onClose() {
-        console.log("Disconnected");
-        document.getElementById('offline').hidden = false
-        isConnected = false;
-        // Try to reconnect after a few seconds
-        setTimeout(function() { wsConnect(url) }, 1000)
-    }
-    function onMessage(evt) {
-        console.log("Received: " + evt.data);
-        msg = evt.data.split(".")
-        switch (msg[0]){
-            case "all":
-                free_pins = msg[1].split(",")
-                for (const freePinsKey in free_pins) {
-                    let pin = document.createElement('a')
-                    pin.innerHTML = '<a href="">'+freePinsKey+'</a>'
-                    pin.onclick = function () {
-                        console.log('Sending: new.'+freePinsKey)
-                        websocket.send("new."+freePinsKey)
-                    }
-                    document.getElementById('new-zone-cont').appendChild(pin)
-                }
-                break
-        }
-        /*switch(msg[1]) {
-            case "0":
-                console.log(msg[0] + ". LED is off")
-
-                break
-            case "1":
-                console.log(msg[0] + "LED is on")
-                break
-        }*/
-    }
-    function changeZone(num) {
-        if (isConnected) {
-            console.log("Sending: " + "set." + num + " & " + "get." + num)
-            websocket.send("set." + num)
-            websocket.send("get." + num)
-        }
-    }
-
-    function createZone() {//TODO jobbclick->delete
-        if (isConnected){
-            console.log("Sending: getall")
-            websocket.send("get_all")
-        }
-        /*let pin = document.createElement('a')
-        pin.innerHTML = '<a href="">17</a>'
-        document.getElementById('new-zone-cont').appendChild(pin)*/
-
-
-        /*let menu = document.createElement("div")
-        menu.id = "ctxmenu"
-        menu.style = `top:{cusror.pageY-10}px;left:{this.pageX-40}px`
-        menu.onmouseleave = () => ctxmenu.outerHTML = ''
-        menu.innerHTML = "<p>Option1</p><p>Option2</p><p>Option3</p><p>Option4</p><p onclick='alert(`Thank you!`)'>Upvote</p>"
-        document.body.appendChild(menu)*/
-    }
-    function editZones() {
-
-    }
-
-
-
-    let timerIV
-    document.getElementById('run-btn').onclick = function () {<!--TODO name+átnevezés STOPRA??-->
-        if (this.innerText === 'RUN') {//TODO ajax: isRunning-zone->villog és minden időzítőt stop mikor az fut(na)
-            document.getElementById('d-counter-min').innerText = document.getElementById('slider_val_char').value
-            let counterC = document.getElementById('d-counter-min').innerText
-            this.innerText = 'STOP'
-            timerIV = window.setInterval(function (){
-                if (counterC > 0){
-                    counterC = parseInt(counterC) - 1
-                    document.getElementById('d-counter-min').innerText = counterC
-                } else
-                    clearInterval(timerIV)
-            },1000)//TODO ->60000
-
-        } else {
-            clearInterval(timerIV)
-            this.innerText = 'RUN'
-        }
-    }
-
-    let i = 0;//indításkor először a többit töltse be
-    document.getElementById('new-act-btn').onclick = function (){ //TODO AJAX üzi+->ell.KÉP
-        this.disabled = true
-        document.querySelectorAll('.edit-btn').forEach(btn => {btn.disabled = true; });
-        let newBlock = (document.getElementById('event-block-sample').children[0].cloneNode(true))
-        newBlock.id = "act-block" + i++;
-        newBlock.querySelector('.act_min_slide').value = 1
-        newBlock.querySelector('.act_min_slide_char').value = 1
-        document.getElementById('event-blocks').appendChild(newBlock)
-    }
-
-        function f5EndClock(mPar) {
-        let endTime = 60*parseInt(mPar.querySelector('.st-h').innerText)
-            + parseInt(mPar.querySelector('.st-min').innerText)
-            + parseInt(mPar.parentElement.querySelector('.act_min_slide_char').innerText)
-        let ora = Math.floor(endTime / 60)
-        if (ora > 23) {//TODO slider+char-t mozgat
-            mPar.querySelector('.end-h').innerText = '23'
-            mPar.querySelector('.end-min').innerText = '59'
-        } else {
-            mPar.querySelector('.end-h').innerText = ora
-            mPar.querySelector('.end-min').innerText = endTime % 60
-        }
-        mPar.parentElement.querySelector('.edit-btn').disabled = false
-    }
-</script>
-
-
-<div id="event-block-sample" hidden="hidden">
+<div id="event-block-sample" hidden="hidden"> <!--TODO 2 var-->
     <div style="text-align: center">
         <hr>
         <div class="has-margin is-editing">
             <div class="row">
                 <div class="col3"></div>
                 <div class="week-btns col3 edit-mode">
-                    <!--button>H</button>
+                    <!--button>H</button><--todo 2.0: h,k,sz,... gombok: .week-btn[2].onclick->
                     <button>K</button>
                     <button>Sz</button>
                     <button>Cs</button>
                     <button>P</button>
                     <button>Szo</button>
                     <button>V</button-->
-                </div> <!--todo 2.0: h,k,sz,... gombok: .week-btn[2].onclick-->
+                </div> 
                 <div class="col3" style="text-align: right">
-                    <button class="edit-btn" disabled="disabled" onclick="{
-                        let thgrgrPar = this.parentNode.parentNode.parentElement
-                        if (this.innerHTML === 'EDIT') { //TODO lecserélnni, pl. val->kép???
-                            document.getElementById('new-act-btn').disabled = true
-                            thgrgrPar.classList.add('is-editing')
-                            this.innerHTML = 'OK'
-                        } else {
-                            //TODO '-' nem lehet az órában!!!
-                            //TODO előtte ajax üzi a szervernek erről a változásról
-                            //TODO if okay... else err+return
-
-                            //TODO ajax szervernél is rendez/csak a javitás helyét küldi el
-                            /**Sorba rendezés*/
-                            const evBlockCont = document.getElementById('event-blocks')
-                            const divs = evBlockCont.children
-                            if (divs.length > 1) {
-                                for (let i = 0; i < divs.length - 1; i++) {
-                                    if (parseInt(divs[i].querySelector('.st-h').innerText) > parseInt(thgrgrPar.querySelector('.st-h').innerText) ||
-                                       (parseInt(divs[i].querySelector('.st-h').innerText) === parseInt(thgrgrPar.querySelector('.st-h').innerText) &&
-                                        parseInt(divs[i].querySelector('.st-min').innerText) > parseInt(thgrgrPar.querySelector('.st-min').innerText))){
-                                        evBlockCont.insertBefore(thgrgrPar.parentElement, divs[i])
-                                        break
-                                    }
-                                }
-                            }
-                            thgrgrPar.classList.remove('is-editing')
-                            this.innerHTML = 'EDIT'
-                            document.getElementById('new-act-btn').disabled = false
-                            document.querySelectorAll('.edit-btn').forEach(btn => {btn.disabled = false; });
-                        }
-                    }">OK</button><br>
-                    <button class="edit-mode" onclick="{
-                        //TODO előtte ajax üzi a szervernek erről
-                        this.parentNode.parentNode.parentNode.parentElement.remove()
-                        document.getElementById('new-act-btn').disabled = false
-                    }">-</button>
+                    <button class="edit-btn" disabled="disabled" onclick="editSchedule(this)">OK</button><br>
+                    <button class="edit-mode" onclick="deleteSchedule(this)">-</button>
                 </div>
             </div>
             <div class="row">
@@ -326,7 +170,7 @@
                           this.parentElement.querySelector('.slide-prev-val').innerText = this.value
                       }
                       else
-                        this.value = parseInt(this.parentElement.querySelector('.slide-prev-val').innerText )
+                        this.value = parseInt(this.parentElement.querySelector('.slide-prev-val').innerText)
 
                 }"/>
             </label>
@@ -341,6 +185,14 @@
                 </div>
             </div>
         </div>
+    </div>
+</div>
+
+<div id="info-overlay">
+    <div id="info-box">
+      <h2>Information</h2>
+      <p>This is the info panel. You can include schedule help, zone tips, etc.</p>
+      <button onclick="{document.getElementById('info-overlay').style.display = 'none';}">Close</button>
     </div>
 </div>
 
